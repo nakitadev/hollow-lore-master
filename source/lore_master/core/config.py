@@ -9,7 +9,7 @@ load_dotenv()
 @dataclass(frozen=True)
 class Settings:
     model: str = "nvidia/nemotron-3.5-lightning:free" 
-    max_tokens: int = 1024
+    max_tokens: int = 2048
     temperature: float = 0.2
     retrieval_k: int = 4                         # number of chunks to retrieve
     chunk_size: int = 800

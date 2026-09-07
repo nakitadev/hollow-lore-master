@@ -7,8 +7,12 @@ chain = build_rag_chain()
 theme = gr.themes.Soft(font=["Inter", "system-ui", "sans-serif"])
 
 
-def chat(message: str, history: list[dict]) -> str:
-    return chain.invoke({"question": message, "history": history})
+def chat(message: str, history: list[dict], request: gr.Request | None = None) -> str:
+    thread_id = request.session_hash if (request and getattr(request, "session_hash", None)) else "default"
+    return chain.invoke(
+        {"question": message, "history": history},
+        config={"configurable": {"thread_id": thread_id}},
+    )
 
 
 demo = gr.ChatInterface(

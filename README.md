@@ -10,122 +10,164 @@ app_file: app.py
 pinned: false
 ---
 
-# Lore Master (LangChain Edition)
+# Hollow Lore Master (LangGraph RAG Edition)
 
-A **Hollow Knight lore Q&A bot** built with **LangChain**. It scrapes lore from
-the [Hollow Knight Fandom wiki](https://hollowknight.fandom.com), embeds it into a
-[Pinecone](https://www.pinecone.io/) vector store, and answers questions in English
-through a Gradio chat UI — grounded in the retrieved lore and citing its sources.
+A specialized **Hollow Knight lore Q&A assistant** built with **LangChain & LangGraph**. It scrapes lore directly from the [Hollow Knight Fandom wiki](https://hollowknight.fandom.com), chunks and embeds it into a [Pinecone](https://www.pinecone.io/) Serverless vector database, and answers user questions through a Gradio chat UI — grounded strictly in retrieved lore with explicit source citations.
 
-The retrieval chain is **history-aware**: follow-up questions like *"where can I
-find him?"* are rewritten into standalone queries before retrieval, so the bot
-keeps context across a conversation.
+---
 
 ## Architecture
 
-![Hollow Lore Master Architecture](hollow-lore-master-share-card.png)
+![Hollow Lore Master Architecture](hollow-lore-master.png)
 
+### Core Architecture Components
 
-| Concern        | Component                                                                 |
-|----------------|---------------------------------------------------------------------------|
-| Chat model     | `ChatOpenRouter` — `nvidia/nemotron-3.5-lightning:free` ([`core/components.py`](source/lore_master/core/components.py)) |
-| Embeddings     | `HuggingFaceEmbeddings` — `all-MiniLM-L6-v2`, local & free                 |
-| Fetch lore     | [`rag_chat/fetch_wiki.py`](source/lore_master/rag_chat/fetch_wiki.py) — MediaWiki API → clean `.md` |
-| Ingestion      | [`rag_chat/ingest.py`](source/lore_master/rag_chat/ingest.py) — load → split → embed → Pinecone |
-| Retrieval      | `build_retriever()` — `vectorstore.as_retriever(k=4)`                      |
-| RAG chain      | [`rag_chat/rag_chain.py`](source/lore_master/rag_chat/rag_chain.py) — history-aware LCEL chain |
-| UI             | [`scripts/app_rag.py`](scripts/app_rag.py) — `gr.ChatInterface`            |
+| Concern | Component | Implementation |
+|:---|:---|:---|
+| **Chat Model** | `ChatOpenRouter` | `nvidia/nemotron-3.5-lightning:free` (configurable in [`core/config.py`](source/lore_master/core/config.py)) |
+| **Orchestration & Memory** | `LangGraph` (`StateGraph`) | Short-term conversational memory managed by `InMemorySaver` checkpointer ([`rag_chat/rag_chain.py`](source/lore_master/rag_chat/rag_chain.py)) |
+| **Embeddings** | `HuggingFaceEmbeddings` | `all-MiniLM-L6-v2` (384d, runs locally & free, ~90 MB) |
+| **Vector Store** | `PineconeVectorStore` | Serverless index on AWS `us-east-1` (auto-provisioned on boot) |
+| **Lore Scraper** | MediaWiki API Crawler | Recursive category tree walker ([`rag_chat/fetch_wiki.py`](source/lore_master/rag_chat/fetch_wiki.py)) |
+| **Ingestion Pipeline** | `RecursiveCharacterTextSplitter` | Markdown chunking (`chunk_size=800`, `overlap=150`) → Pinecone upsert ([`rag_chat/ingest.py`](source/lore_master/rag_chat/ingest.py)) |
+| **User Interface** | Gradio `gr.ChatInterface` | Session-isolated conversations via `request.session_hash` ([`app.py`](app.py)) |
 
-> `test/test_retriever.py` uses a local, throwaway Chroma store instead of Pinecone
-> so the retrieval-logic test stays free and offline — it isn't testing Pinecone
-> itself, just that chunking + embedding + retrieval works.
+---
 
-## Setup
+## Short-Term Memory via LangGraph Checkpointer
 
-Requires Python 3.12+.
+Rather than relying on an extra LLM round-trip to rewrite user questions (which causes latency, consumes extra tokens, and causes reasoning models like Nemotron to leak internal thought scratchpads), this project uses a **LangGraph StateGraph** coupled with an **`InMemorySaver` checkpointer**:
+
+```
+[ User Input ] ────────► [ Retrieve Node ] (Pinecone Vector Search k=4)
+                               │
+                               ▼
+[ InMemorySaver ] ───► [ Generate Node ] (LLM Prompt: Lore Context + History)
+(Short-term Memory)            │
+                               ▼
+                         [ Final Answer ] (Cleaned & Cited)
+```
+
+- **Thread-Scoped History**: Every Gradio user session is assigned a unique `thread_id` (via `request.session_hash`). `InMemorySaver` automatically preserves conversation state across turns.
+- **Direct Retrieval**: Retrieval queries are issued directly from the user's intent without prompt-rewrite distortion.
+- **Thinking Filter**: The pipeline automatically trims `<think>` blocks and reasoning preambles from reasoning models before rendering in the UI.
+
+---
+
+## Getting Started
+
+### Prerequisites
+- Python 3.12+
+- [uv](https://docs.astral.sh/uv/) (recommended) or standard `pip`
+- An [OpenRouter API Key](https://openrouter.ai/)
+- A free [Pinecone API Key](https://app.pinecone.io/)
+
+### Installation
 
 ```bash
+# Clone the repository
+git clone https://github.com/nakitadev/hollow-lore-master.git
+cd hollow-lore-master
+
+# Create and activate virtual environment with uv
 uv venv
-source .venv/bin/activate            # Windows: .venv\Scripts\activate
+source .venv/bin/activate    # Windows: .venv\Scripts\activate
+
+# Install dependencies
 uv pip install -r requirements.txt
 uv pip install -e .
 ```
 
-Copy `.env.example` to `.env` and set your OpenRouter and Pinecone keys:
+### Environment Configuration
 
-```
-OPENROUTER_API_KEY=your-key-here
-PINECONE_API_KEY=your-key-here
-```
-
-Get a free Pinecone API key at [app.pinecone.io](https://app.pinecone.io/) — no
-need to create an index by hand, `build_retriever()` / `create_embeddings()`
-create the index (`pinecone_index_name` in `config.py`) on first use if it
-doesn't already exist.
-
-> The first run downloads the embedding model (`all-MiniLM-L6-v2`, ~90 MB).
-> After that, embeddings run locally and offline; only the vector store itself
-> is a network call to Pinecone.
-
-## Build the knowledge base
-
-Fetch lore from the wiki and ingest it into the vector store in one step:
+Copy `.env.example` to `.env` and fill in your API keys:
 
 ```bash
-python scripts/run_fetch_ingest.py
+cp .env.example .env
 ```
 
-This:
-1. Crawls the wiki recursively starting from `fetch_wiki.ROOT_CATEGORY` (every
-   sub-category found along the way is followed too) and saves clean `.md`
-   files into `data/knowledge-base/`, mirroring the category hierarchy as
-   nested folders. Pages already saved from a previous run are skipped.
-2. Splits them into chunks, embeds them, and (re)upserts them into the Pinecone
-   index named by `pinecone_index_name` in `config.py`.
+```env
+OPENROUTER_API_KEY=your_openrouter_api_key
+PINECONE_API_KEY=your_pinecone_api_key
+```
 
-> Re-running clears every vector already in the index first, then re-upserts
-> from scratch.
+> **Note**: You do not need to manually configure indexes in Pinecone. The application auto-provisions the serverless index (`hollow-knight-lore` in `us-east-1`) on first startup if it does not already exist.
 
-## Run the chatbot
+---
+
+## Building the Lore Knowledge Base
+
+To scrape lore from the wiki and index it into Pinecone in a single step:
 
 ```bash
-python scripts/app_rag.py
+uv run python scripts/run_fetch_ingest.py
 ```
 
-Launches a Gradio web UI that answers Hollow Knight questions grounded in the
-ingested lore, cites source files, and declines to guess when the answer isn't in
-context.
+This workflow:
+1. Crawls the Hollow Knight Fandom wiki starting from `Category:Wiki`, saving sanitized Markdown files to `data/knowledge-base/` mirroring the category tree.
+2. Splits documents into 800-character chunks with a 150-character overlap.
+3. Generates 384-dimensional dense vectors using `all-MiniLM-L6-v2`.
+4. Upserts the vectors into your Pinecone serverless index.
+
+---
+
+## Running the Chatbot
+
+### Locally (CLI / Browser)
+
+```bash
+uv run app.py
+```
+
+The Gradio web interface will be accessible at `http://localhost:7860`.
+
+---
 
 ## Configuration
 
-All settings live in [`source/lore_master/core/config.py`](source/lore_master/core/config.py):
-model, `temperature`, number of chunks retrieved (`retrieval_k`), the Pinecone
-index name/cloud/region, wiki categories, and the knowledge-base path.
+All system configurations are centralized in [`source/lore_master/core/config.py`](source/lore_master/core/config.py):
 
-## Deploy to Hugging Face Spaces
+```python
+@dataclass(frozen=True)
+class Settings:
+    model: str = "nvidia/nemotron-3.5-lightning:free"  # OpenRouter model ID
+    max_tokens: int = 2048                              # Generation token headroom
+    temperature: float = 0.2                            # Low temperature for grounded RAG
+    retrieval_k: int = 4                                # Retrieved document chunks
+    chunk_size: int = 800                               # Splitter chunk size
+    chunk_overlap: int = 150                            # Splitter overlap
+    knowledge_dir: str = "data/knowledge-base"          # Local raw lore storage
+    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    pinecone_index_name: str = "hollow-knight-lore"
+    pinecone_cloud: str = "aws"
+    pinecone_region: str = "us-east-1"
+```
 
-The YAML header at the top of this file configures a **Gradio Space** whose entry
-point is [`app.py`](app.py). To deploy:
+---
 
-1. Create a new **Gradio** Space and push this repo to it.
-2. In the Space **Settings → Secrets**, add `OPENROUTER_API_KEY` and `PINECONE_API_KEY`.
-3. Commit `data/knowledge-base/` so the Space has the scraped wiki pages without
-   running the fetch step. `app.py` checks the Pinecone index on startup and
-   automatically runs `scripts/run_fetch_ingest.py` to populate it if it's empty
-   (first boot only — later restarts see existing vectors and skip straight to
-   launching the chat UI).
+## Deployment to Hugging Face Spaces
 
-> `app.py` adds `source/` to `sys.path` itself, so the Space works with a plain
-> `pip install -r requirements.txt` — no editable install (`pip install -e .`)
-> needed.
+The YAML header at the top of this repository enables 1-click deployment to **Hugging Face Spaces**:
 
-## What LangChain abstracts
+1. Create a new Space on Hugging Face using the **Gradio** SDK.
+2. Push this repository to your Space remote:
+   ```bash
+   git remote add space https://huggingface.co/spaces/nakitadev/hollow-lore-master
+   git push space main
+   ```
+3. In your Space's **Settings → Variables and secrets**, add:
+   - `OPENROUTER_API_KEY`
+   - `PINECONE_API_KEY`
+4. On initial container startup, `app.py` checks your Pinecone index. If empty, it automatically runs the ingestion pipeline before launching the Gradio server.
 
-Compared to a from-scratch build, LangChain collapses a lot of hand-written
-plumbing into framework calls: the retry/backoff loop becomes
-`max_retries=3` on the chat model; manual chunking becomes
-`RecursiveCharacterTextSplitter`; upserting into Pinecone and building
-ids/metadata becomes `PineconeVectorStore.from_documents(...)`; and the whole
-retrieve → rewrite → prompt → answer flow becomes a single LCEL pipe with
-`RunnablePassthrough.assign`. Less code to maintain, but more behavior hidden
-behind abstractions.
+---
+
+## Testing
+
+Run unit tests for offline vector chunking and retrieval:
+
+```bash
+uv run python test/test_retriever.py
+```
+
+*(Tests use an isolated in-memory Chroma instance to keep testing fast, local, and free without querying Pinecone).*

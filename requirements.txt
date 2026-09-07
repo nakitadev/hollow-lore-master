@@ -9,6 +9,7 @@ langchain-core
 langchain-huggingface
 langchain-openrouter>=0.2.3
 langchain-pinecone
+langgraph
 pinecone
 python-dotenv
 requests

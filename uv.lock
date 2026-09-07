@@ -724,6 +724,7 @@ dependencies = [
     { name = "langchain-huggingface" },
     { name = "langchain-openrouter" },
     { name = "langchain-pinecone" },
+    { name = "langgraph" },
     { name = "pinecone" },
     { name = "python-dotenv" },
     { name = "requests" },
@@ -735,7 +736,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "bs4", specifier = ">=0.0.2" },
-    { name = "gradio", specifier = "==6.19.0" },
+    { name = "gradio", specifier = ">=5.42.0" },
     { name = "langchain", specifier = ">=1.3.9" },
     { name = "langchain-chroma", specifier = ">=1.1.0" },
     { name = "langchain-community", specifier = ">=0.4.2" },
@@ -743,6 +744,7 @@ requires-dist = [
     { name = "langchain-huggingface", specifier = ">=1.2.2" },
     { name = "langchain-openrouter", specifier = ">=0.2.3" },
     { name = "langchain-pinecone", specifier = ">=0.2.13" },
+    { name = "langgraph", specifier = ">=0.2.0" },
     { name = "pinecone", specifier = ">=7.3.0" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
     { name = "requests", specifier = ">=2.34.2" },

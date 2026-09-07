@@ -24,33 +24,34 @@ A specialized **Hollow Knight lore Q&A assistant** built with **LangChain & Lang
 
 | Concern | Component | Implementation |
 |:---|:---|:---|
-| **Chat Model** | `ChatOpenRouter` | `nvidia/nemotron-3.5-lightning:free` (configurable in [`core/config.py`](source/lore_master/core/config.py)) |
-| **Orchestration & Memory** | `LangGraph` (`StateGraph`) | Short-term conversational memory managed by `InMemorySaver` checkpointer ([`rag_chat/rag_chain.py`](source/lore_master/rag_chat/rag_chain.py)) |
+| **Chat Model** | `ChatOpenAI` (OpenRouter endpoint) | `nvidia/nemotron-3.5-lightning:free` via OpenRouter API with `reasoning.max_tokens=0` for instant <1s token streaming ([`core/components.py`](source/lore_master/core/components.py)) |
+| **Orchestration & Memory** | `LangGraph` (`StateGraph`) | Linear retrieve-and-generate graph with short-term conversational memory managed by `InMemorySaver` checkpointer ([`rag_chat/rag_chain.py`](source/lore_master/rag_chat/rag_chain.py)) |
+| **Token Streaming** | Synchronous Generator | Real-time token streaming (`AIMessageChunk`) directly yielded to Gradio UI ([`rag_chat/rag_chain.py`](source/lore_master/rag_chat/rag_chain.py)) |
 | **Embeddings** | `HuggingFaceEmbeddings` | `all-MiniLM-L6-v2` (384d, runs locally & free, ~90 MB) |
 | **Vector Store** | `PineconeVectorStore` | Serverless index on AWS `us-east-1` (auto-provisioned on boot) |
 | **Lore Scraper** | MediaWiki API Crawler | Recursive category tree walker ([`rag_chat/fetch_wiki.py`](source/lore_master/rag_chat/fetch_wiki.py)) |
 | **Ingestion Pipeline** | `RecursiveCharacterTextSplitter` | Markdown chunking (`chunk_size=800`, `overlap=150`) → Pinecone upsert ([`rag_chat/ingest.py`](source/lore_master/rag_chat/ingest.py)) |
-| **User Interface** | Gradio `gr.ChatInterface` | Session-isolated conversations via `request.session_hash` ([`app.py`](app.py)) |
+| **User Interface** | Gradio `gr.ChatInterface` | Real-time streaming chat with session-isolated conversations via `request.session_hash` ([`app.py`](app.py)) |
 
 ---
 
-## Short-Term Memory via LangGraph Checkpointer
+## Pipeline & Real-Time Streaming
 
-Rather than relying on an extra LLM round-trip to rewrite user questions (which causes latency, consumes extra tokens, and causes reasoning models like Nemotron to leak internal thought scratchpads), this project uses a **LangGraph StateGraph** coupled with an **`InMemorySaver` checkpointer**:
+Rather than relying on an extra LLM round-trip to rewrite user questions or enduring 30-second reasoning delays from thinking models, this project uses a streamlined **LangGraph StateGraph** with instant token streaming:
 
 ```
 [ User Input ] ────────► [ Retrieve Node ] (Pinecone Vector Search k=4)
                                │
                                ▼
-[ InMemorySaver ] ───► [ Generate Node ] (LLM Prompt: Lore Context + History)
+[ InMemorySaver ] ───► [ Generate Node ] (Direct Output, reasoning.max_tokens=0)
 (Short-term Memory)            │
                                ▼
-                         [ Final Answer ] (Cleaned & Cited)
+                         [ Real-Time Stream ] ──► Gradio UI (Tokens + Sources)
 ```
 
+- **Instant First-Token Streaming (< 1s)**: By configuring `extra_body={"reasoning": {"max_tokens": 0}}`, OpenRouter bypasses internal reasoning scratchpads, streaming the final answer immediately to the user.
 - **Thread-Scoped History**: Every Gradio user session is assigned a unique `thread_id` (via `request.session_hash`). `InMemorySaver` automatically preserves conversation state across turns.
-- **Direct Retrieval**: Retrieval queries are issued directly from the user's intent without prompt-rewrite distortion.
-- **Thinking Filter**: The pipeline automatically trims `<think>` blocks and reasoning preambles from reasoning models before rendering in the UI.
+- **Lore Master Persona & Citations**: The system prompt adopts an immersive ancient scholar persona, grounds all answers strictly in retrieved markdown documents, gracefully handles greetings without context dumps, and enforces clean citation listings (`Sources: [filename.md]`).
 
 ---
 

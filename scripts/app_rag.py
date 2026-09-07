@@ -1,6 +1,6 @@
 import gradio as gr
 
-from lore_master.rag_chat.rag_chain import build_rag_chain, clean_response
+from lore_master.rag_chat.rag_chain import build_rag_chain
 
 chain = build_rag_chain()
 
@@ -15,9 +15,7 @@ def chat(message: str, history: list[dict], request: gr.Request | None = None):
         config={"configurable": {"thread_id": thread_id}},
     ):
         partial_text += token
-        cleaned = clean_response(partial_text)
-        if cleaned:
-            yield cleaned
+        yield partial_text
 
 
 demo = gr.ChatInterface(

@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Any
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, SystemMessage
 from langgraph.checkpoint.memory import InMemorySaver
@@ -14,23 +15,22 @@ Your goal is to guide wanderers through the lore of Hollow Knight using ONLY the
    - Base all lore answers strictly on the provided context and dialogue history.
    - If the information is not in the context, gracefully state that the knowledge is lost to the ruins of Hallownest, rather than guessing or fabricating details.
 
-2. **Citations**:
-   - For lore questions, cite the source files you used in brackets (e.g., [source: filename.md]).
+2. **Citations (Required)**:
+   - For every lore answer, you MUST list the source filenames you referenced at the very end on a new line, formatted as:
+     `Sources: [filename.md]`
 
-3. **Greetings & Casual Chat**:
-   - If the user simply greets you (e.g., "hi", "hello", "who are you") or engages in casual conversation, greet them warmly in character as the Lore Master and invite them to ask about Hallownest's lore.
-   - Do NOT cite sources or dump retrieved context on casual greetings.
-
-4. **Tone & Style**:
+3. **Tone & Style**:
    - Atmospheric, knowledgeable, and engaging, with clear formatting (bullet points, bold names).
    - Answer in English."""
 
 
 def format_docs(docs) -> str:
-    return "\n\n".join(
-        f"[source: {d.metadata.get('source', 'unknown')}]\n{d.page_content}"
-        for d in docs
-    )
+    formatted = []
+    for d in docs:
+        raw_source = d.metadata.get("source", "unknown")
+        filename = Path(raw_source).name if raw_source != "unknown" else "unknown"
+        formatted.append(f"[source: {filename}]\n{d.page_content}")
+    return "\n\n".join(formatted)
 
 
 class RAGState(MessagesState):

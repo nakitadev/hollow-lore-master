@@ -1,7 +1,7 @@
 --extra-index-url https://download.pytorch.org/whl/cpu
 torch==2.13.0+cpu
 bs4
-gradio>=5.42.0,<6.0.0
+gradio>=5.42.0
 langchain
 langchain-chroma
 langchain-community

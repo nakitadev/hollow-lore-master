@@ -38,7 +38,7 @@ class RAGGraphWrapper:
     def __init__(self, graph):
         self.graph = graph
 
-    def invoke(self, inputs: dict[str, Any], config: dict[str, Any] | None = None) -> Any:
+    def invoke(self, inputs: dict[str, Any] | str, config: dict[str, Any] | None = None) -> Any:
         thread_id = (
             config.get("configurable", {}).get("thread_id", "default")
             if config
@@ -46,17 +46,23 @@ class RAGGraphWrapper:
         )
         cfg = {"configurable": {"thread_id": thread_id}}
 
-        if "messages" in inputs:
-            return self.graph.invoke(inputs, cfg)
-        elif "question" in inputs:
+        if isinstance(inputs, str):
             result = self.graph.invoke(
-                {"messages": [HumanMessage(content=inputs["question"])]},
+                {"messages": [HumanMessage(content=inputs)]},
                 cfg,
             )
             return result["messages"][-1].content
+        elif isinstance(inputs, dict):
+            if "question" in inputs and "messages" not in inputs:
+                result = self.graph.invoke(
+                    {"messages": [HumanMessage(content=inputs["question"])]},
+                    cfg,
+                )
+                return result["messages"][-1].content
+            return self.graph.invoke(inputs, cfg)
         return self.graph.invoke(inputs, cfg)
 
-    def stream(self, inputs: dict[str, Any], config: dict[str, Any] | None = None):
+    def stream(self, inputs: dict[str, Any] | str, config: dict[str, Any] | None = None):
         """Stream response tokens as a synchronous generator."""
         thread_id = (
             config.get("configurable", {}).get("thread_id", "default")
@@ -65,10 +71,15 @@ class RAGGraphWrapper:
         )
         cfg = {"configurable": {"thread_id": thread_id}}
 
-        if "messages" in inputs:
-            graph_inputs = inputs
-        elif "question" in inputs:
-            graph_inputs = {"messages": [HumanMessage(content=inputs["question"])]}
+        if isinstance(inputs, str):
+            graph_inputs = {"messages": [HumanMessage(content=inputs)]}
+        elif isinstance(inputs, dict):
+            if "messages" in inputs:
+                graph_inputs = inputs
+            elif "question" in inputs:
+                graph_inputs = {"messages": [HumanMessage(content=inputs["question"])]}
+            else:
+                graph_inputs = inputs
         else:
             graph_inputs = inputs
 

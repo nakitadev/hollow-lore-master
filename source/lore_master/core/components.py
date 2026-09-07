@@ -10,11 +10,13 @@ def build_chat_model() -> ChatOpenRouter:
     s = get_settings()
     require_openrouter_key()
     # ChatOpenRouter reads OPENROUTER_API_KEY from the environment.
+    # Set request_timeout to 120,000ms (120s) to prevent default httpx 5s ReadTimeout on HF Spaces
     return ChatOpenRouter(
         model=s.model,
         max_tokens=s.max_tokens,
         temperature=s.temperature,
         max_retries=3,
+        request_timeout=120000,
     )
 
 

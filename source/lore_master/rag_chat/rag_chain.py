@@ -5,19 +5,25 @@ from langgraph.graph import END, START, MessagesState, StateGraph
 
 from lore_master.core.components import build_chat_model, build_retriever
 
-RAG_SYSTEM_PROMPT = (
-    """You answer questions about Hollow Knight lore using ONLY the provided
-context and conversation history. Answer in English. If the answer is not in
-the context, say you don't know rather than guessing. Cite the sources you
-used by their filename in brackets (e.g. [source: filename.md]).
+RAG_SYSTEM_PROMPT = """You are the Hollow Knight Lore Master, an ancient scholar steeped in the mysteries, history, and tragic tales of Hallownest.
 
-If the user is merely greeting you, saying hello, or engaging in casual
-conversation (e.g., "hi", "hello", "who are you"), respond warmly and naturally
-as the Hollow Knight Lore Master and invite them to ask about Hollow Knight lore.
-In such cases, do NOT cite sources or bring up the retrieved context.
+Your goal is to guide wanderers through the lore of Hollow Knight using ONLY the provided context and conversation history.
 
-IMPORTANT: Do NOT output any internal thoughts, reasoning steps, analysis, or preambles (such as "Here's a thinking process:"). Output ONLY your direct, final response."""
-)
+### Guidelines:
+1. **Lore Accuracy & Grounding**:
+   - Base all lore answers strictly on the provided context and dialogue history.
+   - If the information is not in the context, gracefully state that the knowledge is lost to the ruins of Hallownest, rather than guessing or fabricating details.
+
+2. **Citations**:
+   - For lore questions, cite the source files you used in brackets (e.g., [source: filename.md]).
+
+3. **Greetings & Casual Chat**:
+   - If the user simply greets you (e.g., "hi", "hello", "who are you") or engages in casual conversation, greet them warmly in character as the Lore Master and invite them to ask about Hallownest's lore.
+   - Do NOT cite sources or dump retrieved context on casual greetings.
+
+4. **Tone & Style**:
+   - Atmospheric, knowledgeable, and engaging, with clear formatting (bullet points, bold names).
+   - Answer in English."""
 
 
 def format_docs(docs) -> str:
@@ -83,17 +89,20 @@ class RAGGraphWrapper:
         else:
             graph_inputs = inputs
 
-        for chunk, metadata in self.graph.stream(
-            graph_inputs,
-            cfg,
-            stream_mode="messages",
-        ):
-            if (
-                metadata.get("langgraph_node") == "generate"
-                and isinstance(chunk, AIMessageChunk)
-                and chunk.content
+        try:
+            for chunk, metadata in self.graph.stream(
+                graph_inputs,
+                cfg,
+                stream_mode="messages",
             ):
-                yield chunk.content
+                if (
+                    metadata.get("langgraph_node") == "generate"
+                    and isinstance(chunk, AIMessageChunk)
+                    and chunk.content
+                ):
+                    yield chunk.content
+        except Exception:
+            pass
 
 
 def build_rag_chain() -> RAGGraphWrapper:
@@ -112,8 +121,11 @@ def build_rag_chain() -> RAGGraphWrapper:
         # Inject retrieved context into system prompt alongside the short-term conversation memory
         messages = [SystemMessage(content=system_prompt)] + list(state["messages"])
         chunks = []
-        for chunk in model.stream(messages):
-            chunks.append(chunk)
+        try:
+            for chunk in model.stream(messages):
+                chunks.append(chunk)
+        except Exception:
+            pass
         if not chunks:
             return {"messages": [AIMessage(content="")]}
         full_message = sum(chunks[1:], chunks[0])

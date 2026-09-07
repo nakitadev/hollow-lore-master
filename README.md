@@ -25,7 +25,6 @@ keeps context across a conversation.
 
 ![Hollow Lore Master Architecture](archify/hollow-lore-architecture.png)
 
-> **Interactive Diagram**: Open [`archify/hollow-lore-architecture.html`](archify/hollow-lore-architecture.html) in your browser (or view the [Archify JSON specification](archify/hollow-lore.architecture.json)) for interactive inspection, color modes, and guided views.
 
 | Concern        | Component                                                                 |
 |----------------|---------------------------------------------------------------------------|

@@ -23,7 +23,7 @@ keeps context across a conversation.
 
 ## Architecture
 
-![Hollow Lore Master Architecture](archify/hollow-lore-architecture.png)
+![Hollow Lore Master Architecture](hollow-lore-master-share-card.png)
 
 
 | Concern        | Component                                                                 |

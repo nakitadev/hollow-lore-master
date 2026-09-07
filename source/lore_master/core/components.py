@@ -1,22 +1,23 @@
 import os
-from langchain_openrouter import ChatOpenRouter
+from langchain_openai import ChatOpenAI
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_pinecone import PineconeVectorStore
 from pinecone import Pinecone, ServerlessSpec
 from .config import get_settings, require_openrouter_key, require_pinecone_key
 
 
-def build_chat_model() -> ChatOpenRouter:
+def build_chat_model() -> ChatOpenAI:
     s = get_settings()
     require_openrouter_key()
-    # ChatOpenRouter reads OPENROUTER_API_KEY from the environment.
-    # Set request_timeout to 120,000ms (120s) to prevent default httpx 5s ReadTimeout on HF Spaces
-    return ChatOpenRouter(
+    return ChatOpenAI(
         model=s.model,
+        api_key=os.environ["OPENROUTER_API_KEY"],
+        base_url="https://openrouter.ai/api/v1",
         max_tokens=s.max_tokens,
         temperature=s.temperature,
         max_retries=3,
-        request_timeout=120000,
+        request_timeout=120,
+        extra_body={"reasoning": {"max_tokens": 0}},
     )
 
 

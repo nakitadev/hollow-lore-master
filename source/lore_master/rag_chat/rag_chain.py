@@ -6,34 +6,14 @@ from langgraph.graph import END, START, MessagesState, StateGraph
 
 from lore_master.core.components import build_chat_model, build_retriever
 
-LORE_SYSTEM_PROMPT = (
-    """You are the Hollow Knight Lore Master, chronicler of the ancient kingdom of Hallownest.
-Answer the user's lore questions using ONLY the provided context and conversation history.
-Answer in English. If the answer is not in the context, politely explain that the archives do not contain that information rather than guessing.
-Always cite the sources you used by their filename in brackets (e.g. [source: Hornet.md])."""
+RAG_SYSTEM_PROMPT = (
+    """You are the Hollow Knight Lore Master, a knowledgeable and immersive guide to the ancient kingdom of Hallownest.
+
+Follow these strict instructions:
+1. GREETINGS & CASUAL TALK: If the user is just saying hello, greeting you, or introducing themselves (e.g. "hi", "hello", "who are you", etc.), respond warmly and naturally as the Lore Master and invite them to ask about Hollow Knight lore. Do NOT cite sources or bring up the retrieved context for casual greetings.
+2. LORE QUESTIONS: Answer lore questions using ONLY the provided context and conversation history. Answer in English. If the answer is not in the context, politely explain that the archives do not contain that information rather than guessing.
+3. CITATIONS: When answering lore questions using the context, cite the sources you used by their filename in brackets (e.g. [source: Hornet.md])."""
 )
-
-GREETING_SYSTEM_PROMPT = (
-    """You are the Hollow Knight Lore Master, a wise and welcoming chronicler of the vast world of Hallownest.
-The user is greeting you or initiating casual conversation.
-Respond warmly, introduce yourself briefly as the Lore Master, and invite them to ask any questions they have about the lore, characters, kingdoms, and history of Hollow Knight.
-Keep your response friendly, immersive, and concise. Do NOT cite any sources."""
-)
-
-GREETING_PATTERNS = [
-    r"^\s*(?:hi|hello|hey|greetings|howdy|yo|sup|good\s+(?:morning|afternoon|evening|day))\b",
-    r"^\s*(?:who\s+are\s+you|who\s+r\s+u|what\s+are\s+you|what\s+can\s+you\s+do|introduce\s+yourself|what\s+is\s+your\s+name|what\s+is\s+this\s+bot)\b",
-    r"^\s*(?:สวัสดี|หวัดดี|ดีครับ|ดีค่ะ|ฮัลโหล)\b",
-    r"^\s*(?:thanks|thank\s+you|thx|bye|goodbye|cya)\b",
-]
-
-
-def is_greeting(query: str) -> bool:
-    """Check if the user input is a casual greeting, small talk, or general introduction."""
-    if not query:
-        return True
-    q = query.strip().lower()
-    return any(re.search(pat, q) for pat in GREETING_PATTERNS)
 
 
 def format_docs(docs) -> str:
@@ -61,7 +41,7 @@ def clean_response(text: str) -> str:
 
 class RAGState(MessagesState):
     """LangGraph state keeping short-term messages and retrieved RAG context."""
-    context: str | None = None
+    context: str
 
 
 class RAGGraphWrapper:
@@ -90,55 +70,29 @@ class RAGGraphWrapper:
 
 
 def build_rag_chain() -> RAGGraphWrapper:
-    """Build a StateGraph RAG pipeline using Intent Routing and InMemorySaver memory."""
+    """Build a StateGraph RAG pipeline using InMemorySaver for short-term memory."""
     retriever = build_retriever()
     model = build_chat_model()
 
-    def direct_chat(state: RAGState) -> dict:
-        """Handle greetings and small talk without querying vector store."""
-        messages = [SystemMessage(content=GREETING_SYSTEM_PROMPT)] + list(state["messages"])
-        response = model.invoke(messages)
-        content = clean_response(response.content)
-        return {"messages": [AIMessage(content=content)]}
-
     def retrieve(state: RAGState) -> dict:
-        """Retrieve relevant lore chunks from Pinecone vector store."""
         user_query = state["messages"][-1].content
         docs = retriever.invoke(user_query)
         return {"context": format_docs(docs)}
 
     def generate(state: RAGState) -> dict:
-        """Generate answer grounded in retrieved context and citations."""
-        context = state.get("context") or ""
-        system_prompt = f"{LORE_SYSTEM_PROMPT}\n\nContext:\n{context}"
+        context = state.get("context", "")
+        system_prompt = f"{RAG_SYSTEM_PROMPT}\n\nContext:\n{context}"
+        # Inject retrieved context into system prompt alongside the short-term conversation memory
         messages = [SystemMessage(content=system_prompt)] + list(state["messages"])
         response = model.invoke(messages)
         content = clean_response(response.content)
         return {"messages": [AIMessage(content=content)]}
 
-    def route_query(state: RAGState) -> str:
-        """Route greetings directly to chat, and lore queries to vector retrieval."""
-        last_msg = state["messages"][-1].content
-        if is_greeting(last_msg):
-            return "direct_chat"
-        return "retrieve"
-
     # Construct the state graph
     builder = StateGraph(RAGState)
-    builder.add_node("direct_chat", direct_chat)
     builder.add_node("retrieve", retrieve)
     builder.add_node("generate", generate)
-
-    # Route at start: greeting -> direct_chat; lore query -> retrieve -> generate
-    builder.add_conditional_edges(
-        START,
-        route_query,
-        {
-            "direct_chat": "direct_chat",
-            "retrieve": "retrieve",
-        },
-    )
-    builder.add_edge("direct_chat", END)
+    builder.add_edge(START, "retrieve")
     builder.add_edge("retrieve", "generate")
     builder.add_edge("generate", END)
 

@@ -20,7 +20,7 @@ import gradio as gr
 
 from lore_master.core.components import ensure_pinecone_index
 from lore_master.core.config import get_settings
-from lore_master.rag_chat.rag_chain import build_rag_chain
+from lore_master.rag_chat.rag_chain import build_rag_chain, clean_response
 
 # เช็คว่า Pinecone index มีข้อมูลหรือยัง ถ้ายังไม่มีให้ fetch + ingest ใหม่
 settings = get_settings()
@@ -40,12 +40,17 @@ chain = build_rag_chain()
 theme = gr.themes.Soft(font=["Inter", "system-ui", "sans-serif"])
 
 
-def chat(message: str, history: list[dict], request: gr.Request | None = None) -> str:
+def chat(message: str, history: list[dict], request: gr.Request | None = None):
     thread_id = request.session_hash if (request and getattr(request, "session_hash", None)) else "default"
-    return chain.invoke(
+    partial_text = ""
+    for token in chain.stream(
         {"question": message, "history": history},
         config={"configurable": {"thread_id": thread_id}},
-    )
+    ):
+        partial_text += token
+        cleaned = clean_response(partial_text)
+        if cleaned:
+            yield cleaned
 
 
 demo = gr.ChatInterface(

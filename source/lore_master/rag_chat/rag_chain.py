@@ -1,6 +1,6 @@
 import re
 from typing import Any
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, SystemMessage
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, MessagesState, StateGraph
 
@@ -15,7 +15,9 @@ used by their filename in brackets (e.g. [source: filename.md]).
 If the user is merely greeting you, saying hello, or engaging in casual
 conversation (e.g., "hi", "hello", "who are you"), respond warmly and naturally
 as the Hollow Knight Lore Master and invite them to ask about Hollow Knight lore.
-In such cases, do NOT cite sources or bring up the retrieved context."""
+In such cases, do NOT cite sources or bring up the retrieved context.
+
+Do NOT include any internal thoughts, reasoning steps, or preambles like "Here's a thinking process:". Output ONLY the direct final response."""
 )
 
 
@@ -31,14 +33,18 @@ def clean_response(text: str) -> str:
     if not text:
         return ""
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
-    if text.strip().startswith("Here's a thinking process:"):
+    stripped = text.strip()
+    if stripped.startswith("Here's a thinking process:"):
         match = re.search(
             r"(?:\*\*Final Answer:?\*\*|### Final Answer|\*\*Answer:?\*\*|Based on the provided context[,\:]?|According to the context[,\:]?)(.*)",
             text,
             flags=re.DOTALL | re.IGNORECASE,
         )
         if match:
-            return match.group(0).strip()
+            ans = match.group(1).strip() if match.group(1).strip() else match.group(0).strip()
+            return ans
+        # Still in the middle of thinking process - don't show to user yet
+        return ""
     return text.strip()
 
 
@@ -48,7 +54,7 @@ class RAGState(MessagesState):
 
 
 class RAGGraphWrapper:
-    """Convenience wrapper exposing an LCEL-compatible .invoke() interface."""
+    """Convenience wrapper exposing an LCEL-compatible .invoke() and .stream() interface."""
 
     def __init__(self, graph):
         self.graph = graph
@@ -71,6 +77,34 @@ class RAGGraphWrapper:
             return result["messages"][-1].content
         return self.graph.invoke(inputs, cfg)
 
+    def stream(self, inputs: dict[str, Any], config: dict[str, Any] | None = None):
+        """Stream response tokens as a synchronous generator."""
+        thread_id = (
+            config.get("configurable", {}).get("thread_id", "default")
+            if config
+            else "default"
+        )
+        cfg = {"configurable": {"thread_id": thread_id}}
+
+        if "messages" in inputs:
+            graph_inputs = inputs
+        elif "question" in inputs:
+            graph_inputs = {"messages": [HumanMessage(content=inputs["question"])]}
+        else:
+            graph_inputs = inputs
+
+        for chunk, metadata in self.graph.stream(
+            graph_inputs,
+            cfg,
+            stream_mode="messages",
+        ):
+            if (
+                metadata.get("langgraph_node") == "generate"
+                and isinstance(chunk, AIMessageChunk)
+                and chunk.content
+            ):
+                yield chunk.content
+
 
 def build_rag_chain() -> RAGGraphWrapper:
     """Build a StateGraph RAG pipeline using InMemorySaver for short-term memory."""
@@ -87,8 +121,13 @@ def build_rag_chain() -> RAGGraphWrapper:
         system_prompt = f"{RAG_SYSTEM_PROMPT}\n\nContext:\n{context}"
         # Inject retrieved context into system prompt alongside the short-term conversation memory
         messages = [SystemMessage(content=system_prompt)] + list(state["messages"])
-        response = model.invoke(messages)
-        content = clean_response(response.content)
+        chunks = []
+        for chunk in model.stream(messages):
+            chunks.append(chunk)
+        if not chunks:
+            return {"messages": [AIMessage(content="")]}
+        full_message = sum(chunks[1:], chunks[0])
+        content = clean_response(full_message.content)
         return {"messages": [AIMessage(content=content)]}
 
     # Construct the state graph

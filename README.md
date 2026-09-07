@@ -23,15 +23,13 @@ keeps context across a conversation.
 
 ## Architecture
 
-```
-fetch_wiki  →  data/knowledge-base/*.md  →  ingest  →  Pinecone index (cloud)
-                                                            │
- user ──► Gradio ──► rag_chain ──► (rewrite question) ──► retriever ──► prompt ──► LLM ──► answer
-```
+![Hollow Lore Master Architecture](archify/hollow-lore-architecture.png)
+
+> **Interactive Diagram**: Open [`archify/hollow-lore-architecture.html`](archify/hollow-lore-architecture.html) in your browser (or view the [Archify JSON specification](archify/hollow-lore.architecture.json)) for interactive inspection, color modes, and guided views.
 
 | Concern        | Component                                                                 |
 |----------------|---------------------------------------------------------------------------|
-| Chat model     | `ChatOpenRouter` — `anthropic/claude-haiku-4-5` ([`core/components.py`](source/lore_master/core/components.py)) |
+| Chat model     | `ChatOpenRouter` — `nvidia/nemotron-3.5-lightning:free` ([`core/components.py`](source/lore_master/core/components.py)) |
 | Embeddings     | `HuggingFaceEmbeddings` — `all-MiniLM-L6-v2`, local & free                 |
 | Fetch lore     | [`rag_chat/fetch_wiki.py`](source/lore_master/rag_chat/fetch_wiki.py) — MediaWiki API → clean `.md` |
 | Ingestion      | [`rag_chat/ingest.py`](source/lore_master/rag_chat/ingest.py) — load → split → embed → Pinecone |

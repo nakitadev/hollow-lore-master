@@ -8,7 +8,7 @@ load_dotenv()
 
 @dataclass(frozen=True)
 class Settings:
-    model: str = "anthropic/claude-haiku-4-5"   # check docs.claude.com for current names
+    model: str = "nvidia/nemotron-3.5-lightning:free" 
     max_tokens: int = 1024
     temperature: float = 0.2
     retrieval_k: int = 4                         # number of chunks to retrieve
